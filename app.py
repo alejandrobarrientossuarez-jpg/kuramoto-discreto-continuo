@@ -447,6 +447,42 @@ if preset != "Personalizada":
             f"Ajusta los deslizadores de arriba."
         )
 
+# ---- Botón para ejecutar la simulación ----
+st.sidebar.markdown("---")
+run_clicked = st.sidebar.button(
+    "▶️  SIMULAR",
+    type="primary",
+    use_container_width=True,
+)
+
+# Si se presiona, calcular la órbita y guardarla en el estado de sesión.
+# Esto hace que los resultados persistan al mover el deslizador de pasos
+# o cambiar de pestaña, sin recalcular en cada interacción.
+if run_clicked:
+    traj_run, kind_run, cyc_run = compute_orbit(theta0, M, kappa)
+    st.session_state["sim"] = {
+        "traj": traj_run,
+        "kind": kind_run,
+        "cycle_info": cyc_run,
+        "N": N,
+        "M": M,
+        "kappa": kappa,
+        "theta0": list(theta0),
+    }
+
+# Aviso si los parámetros cambiaron respecto a la última simulación
+sim = st.session_state.get("sim")
+if sim is not None:
+    params_changed = (
+        sim["N"] != N or sim["M"] != M or sim["kappa"] != kappa
+        or sim["theta0"] != list(theta0)
+    )
+    if params_changed:
+        st.sidebar.info(
+            "Cambiaste algún parámetro. Pulsa **SIMULAR** "
+            "de nuevo para actualizar los resultados."
+        )
+
 
 # ----------------------------------------------------------------------
 #  CABECERA
@@ -477,8 +513,42 @@ with st.expander("📐 ¿Qué calcula el modelo?", expanded=False):
         """
     )
 
-# Calcular la órbita completa
-traj, kind, cycle_info = compute_orbit(theta0, M, kappa)
+# ----------------------------------------------------------------------
+#  ¿HAY UNA SIMULACIÓN LISTA?
+# ----------------------------------------------------------------------
+sim = st.session_state.get("sim")
+
+if sim is None:
+    # Aún no se ha pulsado el botón: mostrar pantalla de bienvenida y parar.
+    st.info(
+        "👈  Ajusta los parámetros en la barra lateral y pulsa "
+        "**▶️ SIMULAR** para ejecutar la dinámica."
+    )
+    st.markdown(
+        """
+        #### ¿Qué vas a ver al simular?
+        - **🎨 Vista visual** — los osciladores moviéndose sobre el círculo
+          discreto y la subred que van formando al sincronizar.
+        - **🔬 Vista técnica** — el detalle numérico de cada paso (sumas de
+          acoplamiento, correcciones) y la trayectoria completa.
+        - **🔷 Retículo y comparación** — el mapa de todas las particiones,
+          con las que el modelo continuo tiene **prohibidas** frente a las que
+          el discreto **sí alcanza**.
+
+        Prueba las **plantillas rápidas** de la barra lateral para cargar los
+        ejemplos de la nota con un clic.
+        """
+    )
+    st.stop()
+
+# Recuperar los datos de la simulación guardada
+traj = sim["traj"]
+kind = sim["kind"]
+cycle_info = sim["cycle_info"]
+# Usar los parámetros con los que se simuló (no los actuales de los sliders)
+M = sim["M"]
+N = sim["N"]
+kappa = sim["kappa"]
 
 # Banner de resultado
 labels = {
