@@ -289,6 +289,14 @@ def draw_lattice(N, ax, visited_labels=None, current_label=None,
     max_rank = N        # nivel del ínfimo (todos separados)
     min_rank = 1        # nivel del supremo (todos juntos)
 
+    # Separación horizontal mínima entre nodos vecinos (en unidades de datos).
+    # El ancho de cada nivel se calcula para garantizar esta separación,
+    # de modo que las etiquetas no se empalmen aunque el nivel esté muy poblado.
+    DX = 2.4
+    # Cuántos nodos tiene el nivel más poblado (para fijar el ancho total)
+    max_per_level = max(len(plist) for plist in levels.values())
+    half_width = (max_per_level - 1) * DX / 2.0
+
     # Asignar coordenadas: y por nivel, x repartido en cada nivel
     pos = {}
     info = {}
@@ -297,9 +305,11 @@ def draw_lattice(N, ax, visited_labels=None, current_label=None,
         plist_sorted = sorted(plist, key=lambda p: partition_label(p))
         k = len(plist_sorted)
         for idx, p in enumerate(plist_sorted):
-            x = (idx - (k - 1) / 2) * (3.2 / max(k, 1))
-            # y: ínfimo arriba (rank=N), supremo abajo (rank=1)
-            y = (r - min_rank) / max(max_rank - min_rank, 1) * 4.0
+            # Centrar cada nivel y separar los nodos por DX exactos
+            x = (idx - (k - 1) / 2) * DX
+            # y: ínfimo arriba (rank=N), supremo abajo (rank=1).
+            # Más separación vertical entre niveles para que respire.
+            y = (r - min_rank) / max(max_rank - min_rank, 1) * 5.0
             lbl = partition_label(p)
             pos[lbl] = (x, y)
             info[lbl] = {
@@ -374,19 +384,22 @@ def draw_lattice(N, ax, visited_labels=None, current_label=None,
             ax.plot(x, y, "o", markersize=24, markerfacecolor="none",
                     markeredgecolor="#0e6e56", markeredgewidth=2.5, zorder=5)
 
-        # Etiqueta
-        fs = 7 if N >= 5 else 8
-        ax.text(x, y - 0.28, lbl, ha="center", va="top",
-                fontsize=fs, color="#333333", zorder=6)
+        # Etiqueta (rotada si el nivel está muy poblado, para no empalmar)
+        fs = 8 if N <= 4 else 7
+        rot = 0 if max_per_level <= 6 else 30
+        ax.text(x, y - 0.38, lbl, ha="center", va="top",
+                fontsize=fs, color="#333333", zorder=6,
+                rotation=rot, rotation_mode="anchor")
 
     # Marcas de ínfimo / supremo
-    ax.text(0, 4.55, "ínfimo (todos separados)", ha="center",
-            fontsize=8, style="italic", color="#888888")
-    ax.text(0, -0.75, "supremo (todos sincronizados)", ha="center",
-            fontsize=8, style="italic", color="#888888")
+    ax.text(0, 5.65, "ínfimo (todos separados)", ha="center",
+            fontsize=9, style="italic", color="#888888")
+    ax.text(0, -1.05, "supremo (todos sincronizados)", ha="center",
+            fontsize=9, style="italic", color="#888888")
 
-    ax.set_xlim(-2.2, 2.2)
-    ax.set_ylim(-1.1, 4.8)
+    margin = half_width + DX * 0.6
+    ax.set_xlim(-margin, margin)
+    ax.set_ylim(-1.5, 6.0)
     ax.axis("off")
 st.sidebar.title("⚙️ Parámetros")
 
@@ -738,35 +751,40 @@ with tab_reticulo:
     # ---- COMPARACIÓN LADO A LADO ----
     st.markdown("### Comparación: ¿qué puede alcanzar cada modelo?")
     st.markdown(
-        "A la izquierda, el modelo **continuo**: las particiones cruzadas están "
+        "**Arriba**, el modelo **continuo**: las particiones cruzadas están "
         "**tachadas en rojo** porque la preservación del orden circular de las "
-        "fases las hace inalcanzables. A la derecha, el modelo **discreto**: "
+        "fases las hace inalcanzables. **Abajo**, el modelo **discreto**: "
         "esas mismas particiones (en naranja) **sí son alcanzables**, porque la "
         "dinámica avanza por saltos enteros sin obstáculo geométrico."
     )
 
-    colA, colB = st.columns(2)
-
     if N <= 5:
-        with colA:
-            st.markdown("#### 🚫 Continuo")
-            figL, axL = plt.subplots(figsize=(5.2, 5.6))
-            draw_lattice(N, axL, visited_labels=set(), current_label=None,
-                         mode="continuous")
-            axL.set_title("Particiones cruzadas: VEDADAS",
-                          fontsize=11, color="#c0392b", fontweight="bold")
-            st.pyplot(figL)
-            plt.close(figL)
+        # Ancho de figura proporcional al nivel más poblado, para que los
+        # nodos nunca se empalmen. N=3 es estrecho; N=5 necesita ser ancho.
+        _parts = all_partitions(N)
+        _lvl = {}
+        for _p in _parts:
+            _lvl[len(_p)] = _lvl.get(len(_p), 0) + 1
+        max_lvl = max(_lvl.values())
+        fig_w = max(7, min(22, 1.6 * max_lvl + 3))
 
-        with colB:
-            st.markdown("#### ✅ Discreto")
-            figR, axR = plt.subplots(figsize=(5.2, 5.6))
-            draw_lattice(N, axR, visited_labels=visited,
-                         current_label=current_lbl, mode="discrete")
-            axR.set_title("Particiones cruzadas: ALCANZABLES",
-                          fontsize=11, color="#ba7517", fontweight="bold")
-            st.pyplot(figR)
-            plt.close(figR)
+        # --- CONTINUO (arriba, a todo el ancho) ---
+        st.markdown("#### 🚫 Continuo — particiones cruzadas VEDADAS")
+        figL, axL = plt.subplots(figsize=(fig_w, 5.2))
+        draw_lattice(N, axL, visited_labels=set(), current_label=None,
+                     mode="continuous")
+        st.pyplot(figL)
+        plt.close(figL)
+
+        st.markdown("---")
+
+        # --- DISCRETO (abajo, a todo el ancho) ---
+        st.markdown("#### ✅ Discreto — particiones cruzadas ALCANZABLES")
+        figR, axR = plt.subplots(figsize=(fig_w, 5.2))
+        draw_lattice(N, axR, visited_labels=visited,
+                     current_label=current_lbl, mode="discrete")
+        st.pyplot(figR)
+        plt.close(figR)
     else:
         st.warning(
             f"Para N={N} hay 203 particiones: el retículo completo sería "
