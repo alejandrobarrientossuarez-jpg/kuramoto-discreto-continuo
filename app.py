@@ -135,6 +135,54 @@ def compute_orbit(theta0, M, kappa, max_steps=60):
 
 
 # ----------------------------------------------------------------------
+#  RETÍCULO DE PARTICIONES (estructura combinatoria)
+# ----------------------------------------------------------------------
+def all_partitions(n):
+    """Genera todas las particiones del conjunto {0,1,...,n-1}."""
+    def _gen(collection):
+        if len(collection) == 1:
+            yield [collection]
+            return
+        first = collection[0]
+        for smaller in _gen(collection[1:]):
+            for i, subset in enumerate(smaller):
+                yield smaller[:i] + [[first] + subset] + smaller[i + 1:]
+            yield [[first]] + smaller
+    return list(_gen(list(range(n))))
+
+
+def normalize_partition(part):
+    """Ordena bloques por (tamaño, primer elemento) para comparación estable."""
+    return tuple(sorted((tuple(sorted(b)) for b in part), key=lambda b: (len(b), b[0])))
+
+
+def partition_is_crossing(part):
+    """¿La partición (lista de bloques) es cruzada en el orden 1<2<...<N?"""
+    block_of = {}
+    for bi, block in enumerate(part):
+        for x in block:
+            block_of[x] = bi
+    for block in part:
+        sb = sorted(block)
+        for a, b in itertools.combinations(sb, 2):
+            for c in range(a + 1, b):
+                if block_of.get(c) != block_of[a]:
+                    return True
+    return False
+
+
+def partition_label(part):
+    """Etiqueta legible: {1,3}{2}."""
+    pn = sorted((sorted(b) for b in part), key=lambda b: b[0])
+    return "".join("{" + ",".join(str(i + 1) for i in block) + "}" for block in pn)
+
+
+def partition_rank(part):
+    """Número de bloques (para ubicar en niveles del retículo)."""
+    return len(part)
+
+
+# ----------------------------------------------------------------------
 #  VISUALIZACIÓN: CÍRCULO DISCRETO
 # ----------------------------------------------------------------------
 def draw_circle(theta, M, ax, title=""):
@@ -217,8 +265,129 @@ def draw_network(theta, ax, title=""):
 
 
 # ----------------------------------------------------------------------
-#  BARRA LATERAL — PARÁMETROS
+#  VISUALIZACIÓN: RETÍCULO DE PARTICIONES
 # ----------------------------------------------------------------------
+def draw_lattice(N, ax, visited_labels=None, current_label=None,
+                 mode="discrete"):
+    """
+    Dibuja el retículo de particiones de {1..N} organizado por niveles
+    (número de bloques). Colorea las particiones cruzadas y, opcionalmente,
+    resalta las visitadas por una trayectoria.
+
+    mode='continuous': las cruzadas se muestran tachadas (vedadas).
+    mode='discrete':   las cruzadas se muestran disponibles.
+    """
+    visited_labels = visited_labels or set()
+    parts = all_partitions(N)
+
+    # Agrupar por nivel (número de bloques)
+    levels = {}
+    for p in parts:
+        r = len(p)
+        levels.setdefault(r, []).append(p)
+
+    max_rank = N        # nivel del ínfimo (todos separados)
+    min_rank = 1        # nivel del supremo (todos juntos)
+
+    # Asignar coordenadas: y por nivel, x repartido en cada nivel
+    pos = {}
+    info = {}
+    for r, plist in levels.items():
+        # ordenar para estabilidad visual
+        plist_sorted = sorted(plist, key=lambda p: partition_label(p))
+        k = len(plist_sorted)
+        for idx, p in enumerate(plist_sorted):
+            x = (idx - (k - 1) / 2) * (3.2 / max(k, 1))
+            # y: ínfimo arriba (rank=N), supremo abajo (rank=1)
+            y = (r - min_rank) / max(max_rank - min_rank, 1) * 4.0
+            lbl = partition_label(p)
+            pos[lbl] = (x, y)
+            info[lbl] = {
+                "crossing": partition_is_crossing(p),
+                "rank": r,
+                "part": p,
+            }
+
+    # Dibujar aristas de cobertura (relación de refinamiento entre niveles
+    # adyacentes): conectar P (nivel r) con P' (nivel r-1) si P' se obtiene
+    # uniendo exactamente dos bloques de P.
+    def covers(p_fine, p_coarse):
+        # p_coarse cubre a p_fine si une exactamente dos bloques
+        if len(p_coarse) != len(p_fine) - 1:
+            return False
+        set_fine = [set(b) for b in p_fine]
+        set_coarse = [set(b) for b in p_coarse]
+        # cada bloque coarse es unión de bloques fine
+        for cb in set_coarse:
+            covered = [fb for fb in set_fine if fb <= cb]
+            if set().union(*covered) != cb:
+                return False
+        return True
+
+    labels_by_rank = {r: [partition_label(p) for p in plist]
+                      for r, plist in levels.items()}
+    for r in range(max_rank, min_rank, -1):
+        for lf in labels_by_rank.get(r, []):
+            pf = info[lf]["part"]
+            for lc in labels_by_rank.get(r - 1, []):
+                pc = info[lc]["part"]
+                if covers(pf, pc):
+                    x1, y1 = pos[lf]
+                    x2, y2 = pos[lc]
+                    ax.plot([x1, x2], [y1, y2], "-",
+                            color="#dddddd", linewidth=0.8, zorder=1)
+
+    # Dibujar nodos
+    for lbl, (x, y) in pos.items():
+        crossing = info[lbl]["crossing"]
+        visited = lbl in visited_labels
+        is_current = (lbl == current_label)
+
+        # Estilo según tipo
+        if crossing:
+            if mode == "continuous":
+                # vedada: contorno rojo tenue, relleno hueco
+                face = "#ffffff"
+                edge = "#d9a0a0"
+                ax.plot(x, y, "o", markersize=15, markerfacecolor=face,
+                        markeredgecolor=edge, markeredgewidth=1.5, zorder=3)
+                # tachado
+                ax.plot([x - 0.12, x + 0.12], [y - 0.12, y + 0.12],
+                        color="#c0392b", linewidth=1.3, zorder=4)
+                ax.plot([x - 0.12, x + 0.12], [y + 0.12, y - 0.12],
+                        color="#c0392b", linewidth=1.3, zorder=4)
+            else:
+                # discreta cruzada: naranja
+                face = "#ba7517" if visited else "#f3d9b3"
+                edge = "#7a4d0e"
+                ax.plot(x, y, "o", markersize=16, markerfacecolor=face,
+                        markeredgecolor=edge, markeredgewidth=1.6, zorder=3)
+        else:
+            # no cruzada
+            face = "#1f4a8c" if visited else "#cdd8e8"
+            edge = "#13315c"
+            ax.plot(x, y, "o", markersize=15, markerfacecolor=face,
+                    markeredgecolor=edge, markeredgewidth=1.3, zorder=3)
+
+        # Resaltar el nodo actual con un anillo
+        if is_current:
+            ax.plot(x, y, "o", markersize=24, markerfacecolor="none",
+                    markeredgecolor="#0e6e56", markeredgewidth=2.5, zorder=5)
+
+        # Etiqueta
+        fs = 7 if N >= 5 else 8
+        ax.text(x, y - 0.28, lbl, ha="center", va="top",
+                fontsize=fs, color="#333333", zorder=6)
+
+    # Marcas de ínfimo / supremo
+    ax.text(0, 4.55, "ínfimo (todos separados)", ha="center",
+            fontsize=8, style="italic", color="#888888")
+    ax.text(0, -0.75, "supremo (todos sincronizados)", ha="center",
+            fontsize=8, style="italic", color="#888888")
+
+    ax.set_xlim(-2.2, 2.2)
+    ax.set_ylim(-1.1, 4.8)
+    ax.axis("off")
 st.sidebar.title("⚙️ Parámetros")
 
 N = st.sidebar.slider("Número de osciladores  N", 3, 6, 3,
@@ -327,7 +496,9 @@ getattr(st, level)(f"**{msg}**  ·  longitud de trayectoria: {len(traj) - 1} pas
 # ----------------------------------------------------------------------
 #  PESTAÑAS
 # ----------------------------------------------------------------------
-tab_visual, tab_tecnica = st.tabs(["🎨 Vista visual", "🔬 Vista técnica"])
+tab_visual, tab_tecnica, tab_reticulo = st.tabs(
+    ["🎨 Vista visual", "🔬 Vista técnica", "🔷 Retículo y comparación"]
+)
 
 # Estado del paso actual (control deslizante compartido)
 n_steps = len(traj) - 1
@@ -467,6 +638,117 @@ with tab_tecnica:
             "saltar a la sincronización, o ciclar (caso antípoda |a−b|=M/2). "
             "Ninguna de estas tres dinámicas existe en el modelo continuo."
         )
+
+
+# ======================================================================
+#  PESTAÑA RETÍCULO Y COMPARACIÓN
+# ======================================================================
+with tab_reticulo:
+    st.subheader("El retículo de particiones de los osciladores")
+    st.markdown(
+        "Cada nodo es una forma posible de agrupar los osciladores según su "
+        "fase. El **ínfimo** (arriba) es el estado inicial con todos separados; "
+        "el **supremo** (abajo) es la sincronización total. La trayectoria de "
+        "tu simulación recorre este retículo de arriba hacia abajo."
+    )
+
+    # Etiquetas visitadas por la trayectoria actual
+    visited = set(partition_label(induced_partition(th)) for th in traj)
+    current_lbl = partition_label(induced_partition(theta_now))
+
+    # ---- Leyenda ----
+    leg_c1, leg_c2, leg_c3, leg_c4 = st.columns(4)
+    leg_c1.markdown("🔵 **Azul** — no cruzada")
+    leg_c2.markdown("🟠 **Naranja** — cruzada")
+    leg_c3.markdown("🟢 **Anillo verde** — estado actual")
+    leg_c4.markdown("**Relleno sólido** — visitada")
+
+    st.markdown("---")
+
+    # ---- COMPARACIÓN LADO A LADO ----
+    st.markdown("### Comparación: ¿qué puede alcanzar cada modelo?")
+    st.markdown(
+        "A la izquierda, el modelo **continuo**: las particiones cruzadas están "
+        "**tachadas en rojo** porque la preservación del orden circular de las "
+        "fases las hace inalcanzables. A la derecha, el modelo **discreto**: "
+        "esas mismas particiones (en naranja) **sí son alcanzables**, porque la "
+        "dinámica avanza por saltos enteros sin obstáculo geométrico."
+    )
+
+    colA, colB = st.columns(2)
+
+    if N <= 5:
+        with colA:
+            st.markdown("#### 🚫 Continuo")
+            figL, axL = plt.subplots(figsize=(5.2, 5.6))
+            draw_lattice(N, axL, visited_labels=set(), current_label=None,
+                         mode="continuous")
+            axL.set_title("Particiones cruzadas: VEDADAS",
+                          fontsize=11, color="#c0392b", fontweight="bold")
+            st.pyplot(figL)
+            plt.close(figL)
+
+        with colB:
+            st.markdown("#### ✅ Discreto")
+            figR, axR = plt.subplots(figsize=(5.2, 5.6))
+            draw_lattice(N, axR, visited_labels=visited,
+                         current_label=current_lbl, mode="discrete")
+            axR.set_title("Particiones cruzadas: ALCANZABLES",
+                          fontsize=11, color="#ba7517", fontweight="bold")
+            st.pyplot(figR)
+            plt.close(figR)
+    else:
+        st.warning(
+            f"Para N={N} hay 203 particiones: el retículo completo sería "
+            "ilegible. Se muestra en su lugar el resumen cuantitativo abajo "
+            "y la lista de particiones cruzadas. Usa N≤5 para ver el retículo "
+            "gráfico completo."
+        )
+
+    # ---- Resumen cuantitativo ----
+    all_p = all_partitions(N)
+    n_total = len(all_p)
+    n_cross = sum(1 for p in all_p if partition_is_crossing(p))
+    n_visited_cross = sum(
+        1 for lbl in visited
+        if any(partition_label(p) == lbl and partition_is_crossing(p)
+               for p in all_p)
+    )
+
+    st.markdown("---")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Particiones totales", n_total,
+              help="Número de Bell B_N")
+    m2.metric("Cruzadas (vedadas al continuo)", n_cross)
+    m3.metric("No cruzadas", n_total - n_cross)
+    m4.metric("Cruzadas en tu trayectoria", n_visited_cross,
+              help="Cuántas particiones cruzadas visita la simulación actual")
+
+    # ---- Mensaje contextual ----
+    if n_visited_cross > 0:
+        st.success(
+            f"🎯 **Tu trayectoria atraviesa {n_visited_cross} partición(es) "
+            f"cruzada(s)** — un camino que el modelo continuo no puede recorrer. "
+            "Esas son justamente las particiones tachadas en rojo a la izquierda."
+        )
+    else:
+        st.info(
+            "Tu trayectoria actual no pasa por ninguna partición cruzada. "
+            "Prueba la plantilla **«Ejemplo de la nota (K₃)»** o coloca dos "
+            "osciladores no consecutivos en la misma fase para forzar un cruce."
+        )
+
+    # ---- Lista explícita de particiones cruzadas ----
+    with st.expander(f"Ver las {n_cross} particiones cruzadas de K_{N}"):
+        cross_list = sorted(
+            (partition_label(p) for p in all_p if partition_is_crossing(p))
+        )
+        reached = [c for c in cross_list if c in visited]
+        not_reached = [c for c in cross_list if c not in visited]
+        st.markdown("**Visitadas por tu trayectoria:** "
+                    + (", ".join(f"`{c}`" for c in reached) if reached else "ninguna"))
+        st.markdown("**No visitadas (pero alcanzables en el discreto):** "
+                    + (", ".join(f"`{c}`" for c in not_reached) if not_reached else "ninguna"))
 
 
 # ----------------------------------------------------------------------
