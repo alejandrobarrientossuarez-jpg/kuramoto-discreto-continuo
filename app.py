@@ -182,6 +182,23 @@ def partition_rank(part):
     return len(part)
 
 
+def bell_number(n):
+    """Número de Bell B_n: todas las particiones de un conjunto de n elementos."""
+    row = [1]
+    for _ in range(n):
+        new = [row[-1]]
+        for x in row:
+            new.append(new[-1] + x)
+        row = new
+    return row[0]
+
+
+def catalan_number(n):
+    """Número de Catalan C_n: particiones no cruzadas (sentido de Kreweras)."""
+    from math import comb
+    return comb(2 * n, n) // (n + 1)
+
+
 # ----------------------------------------------------------------------
 #  VISUALIZACIÓN: CÍRCULO DISCRETO
 # ----------------------------------------------------------------------
@@ -745,6 +762,111 @@ with tab_reticulo:
     leg_c2.markdown("🟠 **Naranja** — cruzada")
     leg_c3.markdown("🟢 **Anillo verde** — estado actual")
     leg_c4.markdown("**Relleno sólido** — visitada")
+
+    st.markdown("---")
+
+    # ---- PANEL DE CONTEOS COMBINATORIOS ----
+    st.markdown("### 🔢 Los números detrás del retículo")
+    st.markdown(
+        f"Para **N = {N}** osciladores, tres sucesiones clásicas describen la "
+        "estructura combinatoria. Cada una cuenta algo distinto:"
+    )
+
+    # Calcular los conteos reales
+    _all_p = all_partitions(N)
+    B = bell_number(N)
+    Cat = catalan_number(N)
+    n_cross_dyn = sum(1 for p in _all_p if partition_is_crossing(p))
+    n_noncross_dyn = len(_all_p) - n_cross_dyn
+
+    cc1, cc2, cc3 = st.columns(3)
+    cc1.metric(
+        f"Bell  B_{N}", B,
+        help="Todas las particiones posibles. Es el tamaño total del "
+             "retículo, común a ambos modelos.",
+    )
+    cc2.metric(
+        f"Catalan  C_{N}", Cat,
+        help="Particiones no cruzadas en el sentido clásico de Kreweras. "
+             "Ligadas a los caminos de Dyck del modelo continuo.",
+    )
+    cc3.metric(
+        "Cruzadas (dinámica)", n_cross_dyn,
+        delta=f"{n_noncross_dyn} no cruzadas",
+        delta_color="off",
+        help="Particiones que el modelo continuo no puede alcanzar por "
+             "preservación del orden, pero el discreto sí.",
+    )
+
+    with st.expander("📖 ¿Qué cuenta cada número y por qué importa?"):
+        st.markdown(
+            r"""
+**Números de Bell — el universo completo.**
+$B_N$ cuenta *todas* las particiones de los $N$ osciladores, sin
+restricción. Es el tamaño total del retículo que ves dibujado. **No es
+exclusivo del caso discreto**: tanto el retículo continuo como el discreto
+tienen $B_N$ nodos. Lo que cambia entre modelos no es este número, sino
+*qué fracción* del retículo es dinámicamente accesible.
+
+**Números de Catalan — las particiones no cruzadas.**
+$C_N$ cuenta las particiones no cruzadas en el sentido clásico. Son
+**relevantes para el caso continuo**: como la preservación del orden
+circular prohíbe que dos bloques se entrelacen, el continuo se restringe a
+esta familia. Los caminos resultantes se ponen en biyección con **caminos
+de Dyck**.
+
+**Sucesión de Golomb — los caminos del continuo.**
+Aquí está la distinción más fina: Catalan cuenta *nodos* (cuántas
+particiones no cruzadas hay), mientras que la **sucesión de Golomb** cuenta
+*caminos* (cuántas trayectorias distintas van del ínfimo al supremo en el
+diagrama del continuo). No son lo mismo: una cosa es cuántas estaciones hay
+en una red de metro, y otra cuántas rutas conectan dos estaciones.
+
+**El caso discreto — sin fórmula cerrada.**
+En el modelo discreto, las particiones cruzadas **sí son alcanzables**, así
+que el conjunto accesible se acerca al Bell completo. Pero que un nodo sea
+alcanzable no significa que el conteo de caminos siga una fórmula bonita:
+como muestra la nota, el número de caminos **depende de los parámetros $M$
+y $\kappa$** y no tiene fórmula cerrada general. Por eso aparecen valores
+como 4, 18 o 270, que no corresponden a ninguna de estas sucesiones
+clásicas.
+
+---
+
+| Objeto | Qué cuenta | Dónde aparece |
+|---|---|---|
+| **Bell** $B_N$ | Todas las particiones (nodos del retículo) | Común a ambos modelos |
+| **Catalan** $C_N$ | Particiones no cruzadas (nodos accesibles en el continuo) | El conjunto que el continuo puede visitar |
+| **Golomb** | Caminos del ínfimo al supremo en el continuo | Conteo de trayectorias del continuo |
+| *(sin fórmula cerrada)* | Caminos en el discreto | Depende de $(M,\kappa)$ |
+
+> **Nota sobre el conteo "Cruzadas (dinámica)".** En esta app marcamos como
+cruzada toda partición en la que un bloque *encierra* a un elemento de otro
+bloque (criterio de convexidad en el orden). Este criterio es ligeramente
+más estricto que el de Kreweras y captura mejor qué es alcanzable bajo la
+dinámica con preservación de orden; por eso el número de no cruzadas que
+contamos aquí ($%d$) puede diferir de $C_N$ ($%d$).
+            """ % (n_noncross_dyn, Cat)
+        )
+
+    # Mini-gráfico de barras Bell vs Catalan vs cruzadas
+    fig_cnt, ax_cnt = plt.subplots(figsize=(7, 2.6))
+    cats = ["Bell\n(todas)", "Catalan\n(no cruz. clás.)",
+            "No cruzadas\n(dinámica)", "Cruzadas\n(dinámica)"]
+    vals = [B, Cat, n_noncross_dyn, n_cross_dyn]
+    cols = ["#888888", "#1f4a8c", "#3a7d3a", "#ba7517"]
+    bars = ax_cnt.bar(cats, vals, color=cols, edgecolor="white", width=0.62)
+    for b, v in zip(bars, vals):
+        ax_cnt.text(b.get_x() + b.get_width() / 2, v + max(vals) * 0.02,
+                    str(v), ha="center", va="bottom",
+                    fontsize=10, fontweight="bold")
+    ax_cnt.set_ylim(0, max(vals) * 1.18)
+    ax_cnt.spines["top"].set_visible(False)
+    ax_cnt.spines["right"].set_visible(False)
+    ax_cnt.tick_params(labelsize=8)
+    ax_cnt.set_ylabel("número de particiones", fontsize=9)
+    st.pyplot(fig_cnt)
+    plt.close(fig_cnt)
 
     st.markdown("---")
 
